@@ -19,7 +19,7 @@ def main():
 	# Label은 창에 텍스트나 이미지를 보여주는 위젯입니다.
 	# 첫 번째 인자는 이 라벨의 부모(어디에 붙일지)인 root입니다.
 	# text는 보여줄 글자, font는 글씨체와 크기를 정합니다.
-	label = tk.Label(root, text="안녕하세요 — Tkinter 창입니다.", font=("Arial", 14))
+	label = tk.Label(root, text="안녕하세요 — Tkinter 창입니다.")
 
 	# pack()은 위젯을 창 안에 배치하는 방법 중 하나입니다.
 	# expand=True는 남는 공간을 이 위젯이 차지하도록 돕습니다.
