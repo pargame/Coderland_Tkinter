@@ -13,10 +13,13 @@ def main():
     entry.pack()
 
     def get_text():
-        print("입력된 텍스트:", entry.get())
+        label.config(text=f'input entry text: {entry.get()}')
 
-    button = tk.Button(root, text="텍스트 가져오기", command=get_text)
+    button = tk.Button(root, text="fetch text", command=get_text)
     button.pack()
+
+    label = tk.Label(root, text="input text:")
+    label.pack()
 
     root.mainloop()
 

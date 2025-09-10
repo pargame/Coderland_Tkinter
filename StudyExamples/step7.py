@@ -9,7 +9,7 @@ def main():
     root.geometry("400x300")
 
     canvas = tk.Canvas(root, bg="white")
-    canvas.pack(fill=tk.BOTH, expand=True)
+    canvas.pack(fill="both", expand=True)
 
     # 사각형 그리기
     canvas.create_rectangle(50, 50, 150, 150, fill="blue")
