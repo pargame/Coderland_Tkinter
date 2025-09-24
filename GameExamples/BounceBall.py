@@ -1,3 +1,4 @@
+
 import tkinter as tk
 import math
 import time
@@ -29,8 +30,8 @@ class Ball:
 		self.x += self.vx * dt
 		self.y += self.vy * dt
 
-    def top(self):
-        return self.y-self.r
+	def top(self):
+		return self.y - self.r
 
 	def bottom(self):
 		return self.y + self.r
@@ -53,9 +54,14 @@ class Platform:
 	def top(self):
 		return self.y1
 
-    def bottom(self):
-        return self.y2
-    
+	def bottom(self):
+		return self.y2
+	
+	def left(self):
+		return self.x1
+	
+	def right(self):
+		return self.x2
 
 
 class Game:
@@ -138,12 +144,20 @@ class Game:
 		# apply horizontal acceleration
 		self.ball.apply_force(ax, self.dt)
 
-		prev_x, prev_y = self.ball.x, self.ball.y
-		ball_bottom = self.ball.bottom()
-        ball_top=self.ball.top()
-
 		# update motion
+		# store previous edges for collision detection
+		prev_left = self.ball.left()
+		prev_right = self.ball.right()
+		prev_top = self.ball.top()
+		prev_bottom = self.ball.bottom()
+
 		self.ball.update(self.dt, self.g)
+
+		# current edges after update
+		cur_left = self.ball.left()
+		cur_right = self.ball.right()
+		cur_top = self.ball.top()
+		cur_bottom = self.ball.bottom()
 
 		# world bounds: left/right
 		if self.ball.left() < 0:
@@ -153,24 +167,32 @@ class Game:
 			self.ball.x = self.width - self.ball.r
 			self.ball.vx = 0
 
-		# collision with platforms (top surface only)
+		# collision with platforms (top, bottom, and side surfaces)
 		for p in self.platforms:
-			top = p.top()
-            bottom = p.bottom()
-			# check horizontal overlap (consider ball radius)
-			if (self.ball.x + self.ball.r) >= p.x1 and (self.ball.x - self.ball.r) <= p.x2:
-				# collision when coming from above (ball_bottom <= top) and now below or touching
-				if ball_bottom <= top:
-					# place ball on top and set vy so it reaches fixed bounce height
-					self.ball.y = top - self.ball.r
-					# set upward velocity to reach bounce_height (independent of incoming speed)
-					self.ball.vy = -self.v_bounce
-                # collision block when coming from other side
-                elif ball_top >= bottom:
-					self.ball.y = bottom + self.ball.r
-                    self.ball.vy = -self.ball.vy*g
+			# top collision (landing from above)
+			if prev_bottom <= p.top() and cur_bottom >= p.top() and self.ball.vy > 0 and (cur_right >= p.left() and cur_left <= p.right()):
+				self.ball.y = p.top() - self.ball.r
+				self.ball.vy = -self.v_bounce
+				self.ball.vx *= 0.98
 
+			# bottom collision (hitting underside while moving up)
+			elif prev_top >= p.bottom() and cur_top <= p.bottom() and self.ball.vy < 0 and (cur_right >= p.left() and cur_left <= p.right()):
+				self.ball.y = p.bottom() + self.ball.r
+				self.ball.vy = -self.ball.vy * 0.9
 
+			# side collisions: prevent entering platform from left/right
+			# only if vertical spans overlap
+			else:
+				vertical_overlap = (cur_bottom > p.top()) and (cur_top < p.bottom())
+				# hitting left side of platform (moving right)
+				if prev_right <= p.left() and cur_right >= p.left() and self.ball.vx > 0 and vertical_overlap:
+					self.ball.x = p.left() - self.ball.r
+					self.ball.vx = 0
+				# hitting right side of platform (moving left)
+				elif prev_left >= p.right() and cur_left <= p.right() and self.ball.vx < 0 and vertical_overlap:
+					self.ball.x = p.right() + self.ball.r
+					self.ball.vx = 0
+					
 
 	def _draw(self):
 		c = self.canvas
