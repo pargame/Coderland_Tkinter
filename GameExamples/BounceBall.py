@@ -64,6 +64,36 @@ class Platform:
 		return self.x2
 
 
+class Obstacle:
+	"""Axis-aligned rectangular obstacle. If the ball touches it, game ends."""
+	def __init__(self, x1, y1, x2, y2, color="red"):
+		self.x1 = x1
+		self.y1 = y1
+		self.x2 = x2
+		self.y2 = y2
+		self.color = color
+
+	def left(self):
+		return self.x1
+
+	def right(self):
+		return self.x2
+
+	def top(self):
+		return self.y1
+
+	def bottom(self):
+		return self.y2
+
+	def intersects_ball(self, ball: Ball) -> bool:
+		# circle-rectangle collision: find closest point on rect to circle center
+		closest_x = min(max(ball.x, self.x1), self.x2)
+		closest_y = min(max(ball.y, self.y1), self.y2)
+		dx = ball.x - closest_x
+		dy = ball.y - closest_y
+		return (dx * dx + dy * dy) <= (ball.r * ball.r)
+
+
 class Game:
 	def __init__(self, width=800, height=600):
 		self.width = width
@@ -90,7 +120,11 @@ class Game:
 
 		# simple rectangular terrain (list of Platform)
 		self.platforms = []
+		# obstacles (red boxes)
+		self.obstacles = []
+
 		self._create_terrain()
+
 
 		# keys
 		self.left_pressed = False
@@ -120,6 +154,10 @@ class Game:
 		self.platforms.append(Platform(580, h - 360, 760, h - 340))
 		# a low wide platform near the left
 		self.platforms.append(Platform(10, h - 260, 160, h - 240))
+
+		# add a red obstacle (example)
+		self.obstacles.append(Obstacle(320, h - 320, 380, h - 280, color='red'))
+
 
 	def _on_left_down(self, event):
 		self.left_pressed = True
@@ -192,6 +230,14 @@ class Game:
 				elif prev_left >= p.right() and cur_left <= p.right() and self.ball.vx < 0 and vertical_overlap:
 					self.ball.x = p.right() + self.ball.r
 					self.ball.vx = 0
+
+		# check obstacles (game over on touch)
+		for o in self.obstacles:
+			if o.intersects_ball(self.ball):
+				self._running = False
+				# draw immediate game over message
+				self.canvas.create_text(self.width//2, self.height//2, text='GAME OVER', fill='white', font=('Consolas', 36, 'bold'))
+				return
 					
 
 	def _draw(self):
@@ -202,6 +248,10 @@ class Game:
 		# draw platforms
 		for p in self.platforms:
 			c.create_rectangle(p.x1, p.y1, p.x2, p.y2, fill=p.color, outline='black')
+
+		# draw obstacles
+		for o in self.obstacles:
+			c.create_rectangle(o.x1, o.y1, o.x2, o.y2, fill=o.color, outline='black')
 
 		# draw ball
 		b = self.ball
