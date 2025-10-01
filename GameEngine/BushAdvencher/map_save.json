@@ -1,0 +1,31 @@
+{
+  "width": 50,
+  "height": 50,
+  "tile_size": 32,
+  "tiles": [
+    {
+      "x": 9,
+      "y": 5,
+      "item_type": "stone"
+    },
+    {
+      "x": 8,
+      "y": 3,
+      "item_type": "stone"
+    },
+    {
+      "x": 11,
+      "y": 8,
+      "item_type": "bush"
+    },
+    {
+      "x": 5,
+      "y": 9,
+      "item_type": "player_start"
+    }
+  ],
+  "player_start": [
+    5,
+    9
+  ]
+}
