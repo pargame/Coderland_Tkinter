@@ -22,56 +22,61 @@ python main.py
 pip install pygame
 ```
 
-## 조작법
+## Controls
 
-### 에디터 모드
-- **좌측 패널 클릭 + 드래그**: 아이템을 맵에 배치
-- **우클릭**: 타일 제거
-- **Play 버튼** 또는 **P 키**: 플레이 모드로 전환
+### Editor Mode
+- **Left panel click**: Select item (cursor changes to item)
+- **Left click/drag in view**: Place selected item continuously
+- **Right click/drag (view)**: Erase tiles continuously
+- **'Drop Item' button**: Deselect item (return to default mode)
+- **Default mode drag**: Move view (pan camera)
+- **Play button** or **P key**: Switch to play mode
 - **Ctrl + S**: 맵 저장 (`map_save.json`)
 - **Ctrl + O**: 맵 불러오기
 - **ESC**: 프로그램 종료
 
-### 플레이 모드
-- **화살표 키** 또는 **WASD**: 플레이어 이동
-- **ESC** 또는 **Stop 버튼**: 에디터 모드로 복귀
+### Play Mode
+- **Arrow keys** or **WASD**: Move player (hold to move continuously)
+- **ESC** or **Stop button**: Return to editor mode
+- **Player position**: Displayed in top bar (yellow text)
 
-## 아이템 타입
+## Item Types
 
-1. **Player Start (녹색)**: 플레이어 시작 위치
-   - 맵에 하나만 배치 가능
-   - 플레이 모드 시작 시 필수
+1. **Player Start (red)**: Player spawn position
+   - Only one can be placed per map
+   - Required to start play mode
+   - Hidden during play mode
 
-2. **Bush (어두운 녹색)**: 풀숲
-   - 플레이어가 지나갈 수 있음
-   - 추후 몬스터 조우 구현 예정
+2. **Bush (dark green)**: Walkable grass
+   - Player can pass through
+   - Future: Random monster encounter
 
-3. **Stone (회색)**: 돌
-   - 플레이어가 지나갈 수 없음 (충돌)
+3. **Stone (gray)**: Blocking obstacle
+   - Player cannot pass through (collision)
 
-## 파일 구조
+## File Structure
 
 ```
 BushAdvencher/
-├── main.py              # 메인 실행 파일
-├── editor.py            # 에디터 메인 로직
-├── map_data.py          # 맵 데이터 구조 및 저장/불러오기
-├── item_types.py        # 아이템 타입 정의
-├── player.py            # 플레이어 클래스
-├── 기획안.md            # 프로젝트 기획안
-└── README.md            # 이 파일
+├── main.py              # Main entry point
+├── editor.py            # Editor main logic
+├── map_data.py          # Map data structure and save/load
+├── item_types.py        # Item type definitions
+├── player.py            # Player class
+├── 기획안.md            # Project design document (Korean)
+└── README.md            # This file
 ```
 
-## 향후 개발 계획
+## Future Development
 
-- [ ] Bush에서 랜덤 몬스터 조우 시스템
-- [ ] 전투 화면 전이
-- [ ] 더 많은 타일/아이템 타입
-- [ ] Undo/Redo 기능
-- [ ] 타일 애니메이션
-- [ ] 미니맵
-- [ ] 레이어 시스템 확장
+- [ ] Random monster encounter system in Bush tiles
+- [ ] Battle screen transition
+- [ ] More tile/item types
+- [ ] Undo/Redo functionality
+- [ ] Tile animations
+- [ ] Minimap
+- [ ] Extended layer system
 
-## 라이선스
+## License
 
 MIT License

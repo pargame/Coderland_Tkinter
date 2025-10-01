@@ -31,7 +31,7 @@ ITEM_REGISTRY = {
     ItemType.PLAYER_START: ItemDefinition(
         ItemType.PLAYER_START,
         "Player Start",
-        (0, 255, 0),  # 녹색
+        (255, 0, 0),  # 빨간색
         True,
         unique=True  # 맵에 하나만 배치 가능
     ),
