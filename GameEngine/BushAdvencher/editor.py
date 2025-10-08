@@ -2,10 +2,12 @@
 맵 에디터 메인 클래스
 """
 import pygame
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict
 from map_data import GameMap
 from item_types import ItemType, get_item_definition, ITEM_REGISTRY
 from player import Player
+from pixel_editor import PixelEditorPanel, PixelSpriteLibrary, PixelSprite
+from debug_log import DebugLogger
 
 class Camera:
     """카메라 (뷰 오프셋)"""
@@ -40,6 +42,7 @@ class Camera:
 class EditorMode:
     EDIT = "edit"
     PLAY = "play"
+    PIXEL_DESIGN = "pixel_design"
 
 class MapEditor:
     """맵 에디터"""
@@ -90,6 +93,22 @@ class MapEditor:
         
         # 아이템 패널 스크롤
         self.item_scroll_offset = 0
+        
+        # Pixel editor
+        self.sprite_library = PixelSpriteLibrary()
+        self.pixel_editor = PixelEditorPanel(
+            self.view_panel_x, self.view_panel_y,
+            self.view_panel_width, self.view_panel_height
+        )
+        self.editing_item_type: Optional[ItemType] = None
+        
+        # Performance optimization: sprite cache
+        self.sprite_cache_32: Dict[str, pygame.Surface] = {}  # 32px sprites for map
+        self.sprite_cache_40: Dict[str, pygame.Surface] = {}  # 40px sprites for panel
+        self._rebuild_sprite_cache()
+        
+        # Debug logger
+        self.logger = DebugLogger(screen_width, screen_height)
     
     def handle_events(self):
         """이벤트 처리"""
@@ -113,25 +132,56 @@ class MapEditor:
                 elif event.key == pygame.K_o and pygame.key.get_mods() & pygame.KMOD_CTRL:
                     self.load_map()
                 
+                # Undo/Redo in pixel design mode
+                elif event.key == pygame.K_z and self.mode == EditorMode.PIXEL_DESIGN:
+                    mods = pygame.key.get_mods()
+                    if mods & pygame.KMOD_SHIFT and mods & pygame.KMOD_CTRL:
+                        # Shift+Ctrl+Z: Redo
+                        if self.pixel_editor.redo():
+                            self.logger.log("Redo", (255, 255, 100))
+                    elif mods & pygame.KMOD_CTRL:
+                        # Ctrl+Z: Undo
+                        if self.pixel_editor.undo():
+                            self.logger.log("Undo", (255, 255, 100))
+                
                 # 플레이 모드는 update에서 연속 키 입력 처리
             
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:  # Left click
-                    self.handle_mouse_down(event.pos)
+                    x, y = event.pos
+                    # Check toolbar first
+                    if y < self.toolbar_height:
+                        self.handle_mouse_down(event.pos)
+                    # Then check item panel
+                    elif x < self.item_panel_width:
+                        self.handle_item_panel_click(x, y)
+                    elif self.mode == EditorMode.PIXEL_DESIGN:
+                        result = self.pixel_editor.handle_mouse_down(event.pos)
+                        if result == "reset":
+                            if self.pixel_editor.reset_to_default():
+                                self.logger.log("Reset to default", (255, 200, 100))
+                    else:
+                        self.handle_mouse_down(event.pos)
                 elif event.button == 3:  # Right click
-                    self.handle_right_mouse_down(event.pos)
+                    if self.mode == EditorMode.EDIT:
+                        self.handle_right_mouse_down(event.pos)
             
             elif event.type == pygame.MOUSEBUTTONUP:
                 if event.button == 1:
-                    self.is_painting = False
-                    self.is_dragging_view = False
-                    self.drag_start_camera_pos = None
-                    self.drag_start_mouse_pos = None
+                    if self.mode == EditorMode.PIXEL_DESIGN:
+                        self.pixel_editor.handle_mouse_up(event.pos)
+                    else:
+                        self.is_painting = False
+                        self.is_dragging_view = False
+                        self.drag_start_camera_pos = None
+                        self.drag_start_mouse_pos = None
                 elif event.button == 3:
                     self.is_erasing = False
             
             elif event.type == pygame.MOUSEMOTION:
-                if self.mode == EditorMode.EDIT:
+                if self.mode == EditorMode.PIXEL_DESIGN:
+                    self.pixel_editor.handle_mouse_motion(event.pos)
+                elif self.mode == EditorMode.EDIT:
                     # View drag (camera movement)
                     if self.is_dragging_view:
                         self.handle_view_drag(event.pos)
@@ -143,64 +193,134 @@ class MapEditor:
                         self.erase_at_mouse(event.pos)
     
     def handle_mouse_down(self, pos: Tuple[int, int]):
-        """마우스 다운 처리"""
+        """Mouse down handler"""
         x, y = pos
         
-        # 툴바 클릭 (플레이 버튼)
+        # Toolbar click
         if y < self.toolbar_height:
-            # 플레이 버튼 영역: 10~110
+            # Play button: 10~110
             if 10 <= x <= 110:
-                self.toggle_play_mode()
-            # 저장 버튼
+                if self.mode != EditorMode.PIXEL_DESIGN:
+                    self.toggle_play_mode()
+            # Save button
             elif 120 <= x <= 220:
-                self.save_map()
-            # 불러오기 버튼
+                if self.mode == EditorMode.PIXEL_DESIGN:
+                    self.save_sprites()
+                else:
+                    self.save_map()
+            # Load button
             elif 230 <= x <= 330:
-                self.load_map()
+                if self.mode != EditorMode.PIXEL_DESIGN:
+                    self.load_map()
         
-        # 아이템 패널 클릭 (아이템 선택 또는 "놓기" 버튼)
-        elif x < self.item_panel_width:
-            self.handle_item_panel_click(x, y)
-        
-        # 뷰 패널 클릭 (에디트 모드만)
+        # View panel click (edit mode only)
         elif self.mode == EditorMode.EDIT and x >= self.view_panel_x and y >= self.view_panel_y:
             if self.selected_item:
-                # 아이템 선택 시 페인팅
+                # Item painting
                 self.is_painting = True
                 self.paint_at_mouse(pos)
             else:
-                # 아이템 미선택 시 뷰 드래그 (카메라 이동)
+                # View drag (camera movement)
                 self.is_dragging_view = True
                 self.drag_start_camera_pos = (self.camera.x, self.camera.y)
                 self.drag_start_mouse_pos = pos
     
     def handle_item_panel_click(self, x: int, y: int):
-        """Handle item panel click - select or drop item"""
-        if self.mode != EditorMode.EDIT:
+        """Handle item panel click - select, drop, or design item"""
+        if self.mode == EditorMode.PLAY:
             return
         
-        # Check "Drop" button area (above item list)
-        drop_button_y = self.toolbar_height + 10
-        drop_button_height = 30
+        # Button area
+        button_y = self.toolbar_height + 10
+        button_height = 30
+        button_width = (self.item_panel_width - 30) // 2
         
-        if drop_button_y <= y <= drop_button_y + drop_button_height:
-            # Drop button clicked
-            if self.selected_item:
-                print("Item dropped")
-            self.selected_item = None
-            return
+        if button_y <= y <= button_y + button_height:
+            if self.mode == EditorMode.PIXEL_DESIGN:
+                # Exit Design button (full width)
+                if 10 <= x <= self.item_panel_width - 10:
+                    self.exit_pixel_design_mode()
+                    return
+            else:
+                # Drop Item button (left)
+                if 10 <= x <= 10 + button_width:
+                    if self.selected_item:
+                        self.logger.log("Item dropped", (255, 200, 100))
+                        self.selected_item = None
+                    return
+                
+                # Design button (right)
+                elif 15 + button_width <= x <= 15 + button_width * 2:
+                    if self.selected_item:
+                        self.enter_pixel_design_mode()
+                    return
         
         # Item list area (each item is 60px height)
-        item_list_start_y = drop_button_y + drop_button_height + 10
+        item_list_start_y = button_y + button_height + 10
         item_y = y - item_list_start_y - self.item_scroll_offset
         
-        if item_y >= 0:
+        if item_y >= 0 and self.mode == EditorMode.EDIT:
             item_index = item_y // 60
             
             items = list(ITEM_REGISTRY.keys())
             if 0 <= item_index < len(items):
                 self.selected_item = items[item_index]
-                print(f"Selected item: {get_item_definition(self.selected_item).name}")
+                item_name = get_item_definition(self.selected_item).name
+                self.logger.log(f"Selected: {item_name}", (100, 200, 255))
+    
+    def enter_pixel_design_mode(self):
+        """Enter pixel design mode for selected item"""
+        if not self.selected_item:
+            return
+        
+        self.mode = EditorMode.PIXEL_DESIGN
+        self.editing_item_type = self.selected_item
+        
+        # Get item definition for default color
+        item_def = get_item_definition(self.selected_item)
+        
+        # Get or create sprite
+        sprite = self.sprite_library.get_sprite(self.selected_item)
+        if not sprite:
+            sprite = PixelSprite(32, 32)
+            # Fill with default color
+            sprite.fill(item_def.color)
+            self.sprite_library.set_sprite(self.selected_item, sprite)
+        
+        # Pass sprite and default color to editor
+        self.pixel_editor.set_sprite(sprite, item_def.color)
+        self.logger.log(f"Design mode: {item_def.name}", (255, 255, 100))
+    
+    def exit_pixel_design_mode(self):
+        """Exit pixel design mode and save sprites"""
+        self.mode = EditorMode.EDIT
+        self.editing_item_type = None
+        # Auto-save sprites when exiting design mode
+        self.save_sprites()
+        # Rebuild sprite cache for performance
+        self._rebuild_sprite_cache()
+        self.logger.log("Exited design mode", (100, 255, 100))
+    
+    def save_sprites(self):
+        """Save sprite library"""
+        try:
+            self.sprite_library.save()
+            self.logger.log("Sprites saved", (100, 255, 100))
+        except Exception as e:
+            self.logger.log(f"Save failed: {e}", (255, 100, 100))
+    
+    def _rebuild_sprite_cache(self):
+        """Rebuild sprite cache for performance optimization"""
+        self.sprite_cache_32.clear()
+        self.sprite_cache_40.clear()
+        
+        for item_type in ITEM_REGISTRY.keys():
+            sprite = self.sprite_library.get_sprite(item_type)
+            if sprite:
+                # Cache 32px version for map rendering
+                self.sprite_cache_32[item_type.value] = sprite.render_to_surface(32)
+                # Cache 40px version for panel rendering
+                self.sprite_cache_40[item_type.value] = sprite.render_to_surface(40)
     
     def handle_right_mouse_down(self, pos: Tuple[int, int]):
         """Handle right mouse down - start erasing"""
@@ -283,12 +403,13 @@ class MapEditor:
     def switch_to_play_mode(self):
         """Switch to play mode"""
         if not self.game_map.player_start:
-            print("Player start position not set!")
+            self.logger.log("No player start position!", (255, 100, 100))
             return
         
         self.mode = EditorMode.PLAY
         start_x, start_y = self.game_map.player_start
         self.player = Player(start_x, start_y, self.game_map.tile_size)
+        self.logger.log("Play mode started", (100, 255, 100))
     
     def switch_to_edit_mode(self):
         """Switch to edit mode"""
@@ -298,22 +419,25 @@ class MapEditor:
         self.camera.y = 0
     
     def save_map(self):
-        """Save map"""
+        """Save map and sprites"""
         try:
             self.game_map.save_to_file("map_save.json")
-            print("Map saved: map_save.json")
+            self.sprite_library.save()
+            self.logger.log("Map saved successfully", (100, 255, 100))
         except Exception as e:
-            print(f"Failed to save map: {e}")
+            self.logger.log(f"Save failed: {e}", (255, 100, 100))
     
     def load_map(self):
         """Load map"""
         try:
             self.game_map = GameMap.load_from_file("map_save.json")
-            print("Map loaded: map_save.json")
+            self.sprite_library.load()
+            self._rebuild_sprite_cache()
+            self.logger.log("Map loaded successfully", (100, 255, 100))
         except FileNotFoundError:
-            print("No saved map file found.")
+            self.logger.log("No saved map found", (255, 200, 100))
         except Exception as e:
-            print(f"Failed to load map: {e}")
+            self.logger.log(f"Load failed: {e}", (255, 100, 100))
     
     def update(self):
         """게임 로직 업데이트"""
@@ -349,6 +473,9 @@ class MapEditor:
         
         # 선택된 아이템 커서 프리뷰
         self.render_cursor_preview()
+        
+        # Debug logger (render on top of everything)
+        self.logger.render(self.screen)
         
         pygame.display.flip()
     
@@ -393,29 +520,71 @@ class MapEditor:
                         (0, self.toolbar_height, self.item_panel_width, 
                          self.screen_height - self.toolbar_height))
         
-        # "Drop" button
-        drop_button_y = self.toolbar_height + 10
-        drop_button_height = 30
-        button_color = (80, 80, 80) if not self.selected_item else (150, 80, 80)
+        # Two buttons side by side
+        button_y = self.toolbar_height + 10
+        button_height = 30
+        button_width = (self.item_panel_width - 30) // 2
         
-        pygame.draw.rect(self.screen, button_color,
-                        (10, drop_button_y, self.item_panel_width - 20, drop_button_height))
-        pygame.draw.rect(self.screen, (200, 200, 200),
-                        (10, drop_button_y, self.item_panel_width - 20, drop_button_height), 2)
+        if self.mode == EditorMode.PIXEL_DESIGN:
+            # Exit Design button (full width)
+            full_button_width = self.item_panel_width - 20
+            exit_color = (100, 150, 100)
+            pygame.draw.rect(self.screen, exit_color,
+                            (10, button_y, full_button_width, button_height))
+            pygame.draw.rect(self.screen, (200, 200, 200),
+                            (10, button_y, full_button_width, button_height), 2)
+            
+            exit_text = self.small_font.render("Exit Design (Auto-saves)", True, (255, 255, 255))
+            exit_rect = exit_text.get_rect(center=(10 + full_button_width // 2, button_y + 15))
+            self.screen.blit(exit_text, exit_rect)
+        else:
+            # Drop Item button (left)
+            if self.selected_item:
+                drop_color = (150, 80, 80)
+                drop_text = "Drop Item"
+            else:
+                drop_color = (80, 80, 80)
+                drop_text = "Default"
+            
+            pygame.draw.rect(self.screen, drop_color,
+                            (10, button_y, button_width, button_height))
+            pygame.draw.rect(self.screen, (200, 200, 200),
+                            (10, button_y, button_width, button_height), 2)
+            
+            text_surface = self.small_font.render(drop_text, True, (255, 255, 255))
+            text_rect = text_surface.get_rect(center=(10 + button_width // 2, button_y + 15))
+            self.screen.blit(text_surface, text_rect)
+            
+            # Design button (right)
+            design_enabled = (self.selected_item is not None and self.mode == EditorMode.EDIT)
+            design_color = (80, 100, 150) if design_enabled else (60, 60, 60)
+            
+            pygame.draw.rect(self.screen, design_color,
+                            (15 + button_width, button_y, button_width, button_height))
+            pygame.draw.rect(self.screen, (200, 200, 200),
+                            (15 + button_width, button_y, button_width, button_height), 2)
+            
+            design_text = "Design"
+            text_surface = self.small_font.render(design_text, True, (255, 255, 255))
+            text_rect = text_surface.get_rect(center=(15 + button_width + button_width // 2, button_y + 15))
+            self.screen.blit(text_surface, text_rect)
         
-        drop_text = "Drop Item" if self.selected_item else "Default Mode"
-        text_surface = self.small_font.render(drop_text, True, (255, 255, 255))
-        text_rect = text_surface.get_rect(center=(self.item_panel_width // 2, drop_button_y + 15))
-        self.screen.blit(text_surface, text_rect)
-        
-        # Item list
-        item_list_start_y = drop_button_y + drop_button_height + 10
-        y_offset = item_list_start_y + self.item_scroll_offset
-        
-        for item_type in ITEM_REGISTRY.keys():
-            if y_offset > self.toolbar_height and y_offset < self.screen_height:
-                self.render_item_in_panel(item_type, 10, y_offset)
-            y_offset += 60
+        # Item list (hide in pixel design mode)
+        if self.mode != EditorMode.PIXEL_DESIGN:
+            item_list_start_y = button_y + button_height + 10
+            y_offset = item_list_start_y + self.item_scroll_offset
+            
+            for item_type in ITEM_REGISTRY.keys():
+                if y_offset > self.toolbar_height and y_offset < self.screen_height:
+                    self.render_item_in_panel(item_type, 10, y_offset)
+                y_offset += 60
+        else:
+            # Show editing item name
+            if self.editing_item_type:
+                item_def = get_item_definition(self.editing_item_type)
+                info_y = button_y + button_height + 20
+                info_text = self.small_font.render(f"Editing: {item_def.name}", True, (255, 255, 0))
+                self.screen.blit(info_text, (10, info_y))
         
         # Divider line
         pygame.draw.line(self.screen, (100, 100, 100),
@@ -423,23 +592,29 @@ class MapEditor:
                         (self.item_panel_width, self.screen_height), 2)
     
     def render_item_in_panel(self, item_type: ItemType, x: int, y: int):
-        """패널에 아이템 렌더링"""
+        """Render item in panel (with caching for performance)"""
         item_def = get_item_definition(item_type)
         
-        # 선택된 아이템이면 하이라이트
+        # Highlight if selected
         is_selected = (self.selected_item == item_type)
         border_color = (255, 255, 0) if is_selected else (255, 255, 255)
         border_width = 3 if is_selected else 2
         
-        # 아이템 박스
-        pygame.draw.rect(self.screen, item_def.color, (x, y, 40, 40))
+        # Use cached sprite if available
+        cached_sprite = self.sprite_cache_40.get(item_type.value)
+        if cached_sprite:
+            self.screen.blit(cached_sprite, (x, y))
+        else:
+            # Render default color box
+            pygame.draw.rect(self.screen, item_def.color, (x, y, 40, 40))
+        
         pygame.draw.rect(self.screen, border_color, (x, y, 40, 40), border_width)
         
-        # 이름
+        # Name
         name_text = self.small_font.render(item_def.name, True, (255, 255, 255))
         self.screen.blit(name_text, (x + 45, y + 5))
         
-        # 속성
+        # Properties
         props = []
         if item_def.walkable:
             props.append("Walkable")
@@ -452,29 +627,33 @@ class MapEditor:
         self.screen.blit(prop_text, (x + 45, y + 22))
     
     def render_view_panel(self):
-        """뷰 패널 렌더링"""
-        # 배경
-        pygame.draw.rect(self.screen, (30, 30, 30),
-                        (self.view_panel_x, self.view_panel_y,
-                         self.view_panel_width, self.view_panel_height))
-        
-        # 그리드 렌더링
-        self.render_grid()
-        
-        # 타일 렌더링
-        self.render_tiles()
-        
-        # Render player (play mode)
-        if self.mode == EditorMode.PLAY and self.player:
-            # Clip to view panel
-            clip_rect = pygame.Rect(self.view_panel_x, self.view_panel_y,
-                                   self.view_panel_width, self.view_panel_height)
-            self.screen.set_clip(clip_rect)
+        """Render view panel or pixel editor"""
+        if self.mode == EditorMode.PIXEL_DESIGN:
+            # Render pixel editor
+            self.pixel_editor.render(self.screen, self.font)
+        else:
+            # Background
+            pygame.draw.rect(self.screen, (30, 30, 30),
+                            (self.view_panel_x, self.view_panel_y,
+                             self.view_panel_width, self.view_panel_height))
             
-            self.player.render(self.screen, self.camera.x, self.camera.y,
-                             self.view_panel_x, self.view_panel_y)
+            # Grid rendering
+            self.render_grid()
             
-            self.screen.set_clip(None)
+            # Tile rendering
+            self.render_tiles()
+            
+            # Render player (play mode)
+            if self.mode == EditorMode.PLAY and self.player:
+                # Clip to view panel
+                clip_rect = pygame.Rect(self.view_panel_x, self.view_panel_y,
+                                       self.view_panel_width, self.view_panel_height)
+                self.screen.set_clip(clip_rect)
+                
+                self.player.render(self.screen, self.camera.x, self.camera.y,
+                                 self.view_panel_x, self.view_panel_y)
+                
+                self.screen.set_clip(None)
     
     def render_grid(self):
         """Render grid lines (only within map bounds)"""
@@ -541,9 +720,15 @@ class MapEditor:
                                               self.view_panel_width, self.view_panel_height)
                         self.screen.set_clip(clip_rect)
                         
-                        item_def = get_item_definition(tile.item_type)
-                        pygame.draw.rect(self.screen, item_def.color,
-                                       (screen_x, screen_y, tile_size, tile_size))
+                        # Use cached sprite for performance
+                        cached_sprite = self.sprite_cache_32.get(tile.item_type.value)
+                        if cached_sprite:
+                            self.screen.blit(cached_sprite, (screen_x, screen_y))
+                        else:
+                            item_def = get_item_definition(tile.item_type)
+                            pygame.draw.rect(self.screen, item_def.color,
+                                           (screen_x, screen_y, tile_size, tile_size))
+                        
                         pygame.draw.rect(self.screen, (255, 255, 255),
                                        (screen_x, screen_y, tile_size, tile_size), 1)
                         
